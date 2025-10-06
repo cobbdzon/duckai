@@ -7,6 +7,8 @@ import type {
   VQDResponse,
   DuckAIRequest,
 } from "./types";
+import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 
 // Rate limiting tracking with sliding window
 interface RateLimitInfo {
@@ -180,6 +182,44 @@ export class DuckAI {
     }
   }
 
+  private async getEncodedVqdHash(vqdHash: string): Promise<string> {
+    const jsScript = Buffer.from(vqdHash, 'base64').toString('utf-8');
+
+    const dom = new JSDOM(
+      `<iframe id="jsa" sandbox="allow-scripts allow-same-origin" srcdoc="<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Security-Policy"; content="default-src 'none'; script-src 'unsafe-inline'">
+</head>
+<body></body>
+</html>" style="position: absolute; left: -9999px; top: -9999px;"></iframe>`,
+      { runScripts: 'dangerously' }
+    );
+    dom.window.top.__DDG_BE_VERSION__ = 1;
+    dom.window.top.__DDG_FE_CHAT_HASH__ = 1;
+    const jsa = dom.window.top.document.querySelector('#jsa') as HTMLIFrameElement;
+    const contentDoc = jsa.contentDocument || jsa.contentWindow!.document;
+
+    const meta = contentDoc.createElement('meta');
+    meta.setAttribute('http-equiv', 'Content-Security-Policy');
+    meta.setAttribute('content', "default-src 'none'; script-src 'unsafe-inline';");
+    contentDoc.head.appendChild(meta);
+    const result = await dom.window.eval(jsScript) as {
+      client_hashes: string[];
+      [key: string]: any;
+    };
+
+    result.client_hashes[0] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+    result.client_hashes = result.client_hashes.map((t) => {
+      const hash = createHash('sha256');
+      hash.update(t);
+
+      return hash.digest('base64');
+    });
+
+    return btoa(JSON.stringify(result));
+  }
+
   private async getVQD(userAgent: string): Promise<VQDResponse> {
     const response = await fetch("https://duckduckgo.com/duckchat/v1/status", {
       headers: {
@@ -207,23 +247,17 @@ export class DuckAI {
       );
     }
 
-    const vqd = response.headers.get("x-Vqd-4");
     const hashHeader = response.headers.get("x-Vqd-hash-1");
 
-    if (!vqd || !hashHeader) {
+    if (!hashHeader) {
       throw new Error(
-        `Missing VQD headers: vqd=${!!vqd}, hash=${!!hashHeader}`
+        `Missing VQD headers: hash=${!!hashHeader}`
       );
     }
 
-    let hash: string;
-    try {
-      hash = atob(hashHeader);
-    } catch (e) {
-      throw new Error(`Failed to decode VQD hash: ${e}`);
-    }
+    const encodedHash = await this.getEncodedVqdHash(hashHeader);
 
-    return { vqd, hash };
+    return { hash: encodedHash };
   }
 
   private async hashClientHashes(clientHashes: string[]): Promise<string[]> {
@@ -247,18 +281,6 @@ export class DuckAI {
     const userAgent = new UserAgent().toString();
     const vqd = await this.getVQD(userAgent);
 
-    const { window } = new JSDOM(
-      `<html><body><script>window.hash = ${vqd.hash}</script></body></html>`,
-      { runScripts: "dangerously" }
-    );
-    const hash = (window as any).hash;
-
-    if (!hash || !hash.client_hashes || !Array.isArray(hash.client_hashes)) {
-      throw new Error(`Invalid hash structure: ${JSON.stringify(hash)}`);
-    }
-
-    const clientHashes = await this.hashClientHashes(hash.client_hashes);
-
     // Update rate limit tracking BEFORE making the request
     const now = Date.now();
     this.rateLimitInfo.requestTimestamps.push(now);
@@ -280,15 +302,8 @@ export class DuckAI {
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-origin",
         "x-fe-version": "serp_20250401_100419_ET-19d438eb199b2bf7c300",
-        "x-vqd-4": vqd.vqd,
         "User-Agent": userAgent,
-        "x-vqd-hash-1": btoa(
-          JSON.stringify({
-            server_hashes: hash.server_hashes,
-            client_hashes: clientHashes,
-            signals: hash.signal,
-          })
-        ),
+        "x-vqd-hash-1": vqd.hash,
       },
       referrer: "https://duckduckgo.com/",
       referrerPolicy: "origin",
@@ -357,20 +372,7 @@ export class DuckAI {
     await this.waitIfNeeded();
 
     const userAgent = new UserAgent().toString();
-
     const vqd = await this.getVQD(userAgent);
-
-    const { window } = new JSDOM(
-      `<html><body><script>window.hash = ${vqd.hash}</script></body></html>`,
-      { runScripts: "dangerously" }
-    );
-    const hash = (window as any).hash;
-
-    if (!hash || !hash.client_hashes || !Array.isArray(hash.client_hashes)) {
-      throw new Error(`Invalid hash structure: ${JSON.stringify(hash)}`);
-    }
-
-    const clientHashes = await this.hashClientHashes(hash.client_hashes);
 
     // Update rate limit tracking BEFORE making the request
     const now = Date.now();
@@ -393,15 +395,8 @@ export class DuckAI {
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-origin",
         "x-fe-version": "serp_20250401_100419_ET-19d438eb199b2bf7c300",
-        "x-vqd-4": vqd.vqd,
         "User-Agent": userAgent,
-        "x-vqd-hash-1": btoa(
-          JSON.stringify({
-            server_hashes: hash.server_hashes,
-            client_hashes: clientHashes,
-            signals: hash.signal,
-          })
-        ),
+        "x-vqd-hash-1": vqd.hash,
       },
       referrer: "https://duckduckgo.com/",
       referrerPolicy: "origin",
@@ -470,10 +465,11 @@ export class DuckAI {
   getAvailableModels(): string[] {
     return [
       "gpt-4o-mini",
-      "o3-mini",
-      "claude-3-haiku-20240307",
-      "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "gpt-5-mini",
+      "claude-3-5-haiku-latest",
+      "meta-llama/Llama-4-Scout-17B-16E-Instruct",
       "mistralai/Mistral-Small-24B-Instruct-2501",
+      "openai/gpt-oss-120b"
     ];
   }
 }
