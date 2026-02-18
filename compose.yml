@@ -2,7 +2,6 @@ services:
   duckai:
     build:
       context: .
-    image: duckai:latest
     ports:
       - "3000:3000"
     environment:

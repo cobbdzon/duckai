@@ -571,14 +571,24 @@ Please follow these instructions when responding to the following user message.`
       throw new Error("messages array cannot be empty");
     }
 
+    console.log(request.messages);
     for (const message of request.messages) {
       if (
         !message.role ||
-        !["system", "user", "assistant", "tool"].includes(message.role)
+        !["system", "developer", "user", "assistant", "tool"].includes(
+          message.role,
+        )
       ) {
         throw new Error(
           "Each message must have a valid role (system, user, assistant, or tool)",
         );
+      }
+
+      // Normalize developer role to system
+      for (const message of request.messages) {
+        if (message.role === "developer") {
+          message.role = "system";
+        }
       }
 
       // Tool messages have different validation rules
