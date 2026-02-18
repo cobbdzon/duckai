@@ -1,10 +1,41 @@
 // OpenAI API Types
 export interface ChatCompletionMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  role: "system" | "developer" | "user" | "assistant" | "tool";
+  content: string | ChatCompletionContentImage[] | null;
   name?: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+}
+
+// DuckDuckGo ready type
+export interface DuckChatCompletionMessage {
+  role: "system" | "developer" | "user" | "assistant" | "tool";
+  content: string | DuckChatCompletionContentImage[] | null;
+  name?: string;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+}
+
+// image support
+// open ai standard
+// [0]: {text: string, type: "text"}
+// [1]: {image_url: { url: string }, type: "image_url"}
+export interface ChatCompletionContentImage {
+  text?: string;
+  image_url?: {
+    url: string;
+  };
+  type: "text" | "image_url";
+}
+
+// what duckduckgo accepts
+// [0]: {text: string, type: "text"}
+// [1]: {image: string, mimeType: string, type: "image"}
+export interface DuckChatCompletionContentImage {
+  text?: string;
+  image?: string;
+  mimeType?: string;
+  type: "text" | "image";
 }
 
 export interface FunctionDefinition {
@@ -122,6 +153,6 @@ export interface DuckAIMetadata {
 
 export interface DuckAIRequest {
   model: string;
-  messages: ChatCompletionMessage[];
+  messages: DuckChatCompletionMessage[];
   metadata?: DuckAIMetadata;
 }

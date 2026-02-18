@@ -11,6 +11,8 @@ import type {
   ToolDefinition,
   ToolCall,
   DuckAIMetadata,
+  DuckChatCompletionContentImage,
+  DuckChatCompletionMessage,
 } from "./types";
 
 export class OpenAIService {
@@ -76,9 +78,51 @@ export class OpenAIService {
     // Use the model from request, fallback to default
     const model = request.model || "mistralai/Mistral-Small-24B-Instruct-2501";
 
+    const transformedMessages: DuckChatCompletionMessage[] = [];
+
+    // TODO: Fix cherry studio not working
+    for (const message of request.messages as ChatCompletionMessage[]) {
+      // Validate images in request message
+      // Transform to DuckChatCompletionRequest
+      if (Array.isArray(message.content)) {
+        const imageText = message.content[0];
+        if (typeof imageText.text !== "string" || imageText.type !== "text") {
+          throw new Error("Image text must be a string of type text");
+        }
+
+        const imagePayload = message.content[1];
+        if (
+          imagePayload.image_url === null ||
+          typeof imagePayload.image_url?.url !== "string" ||
+          imagePayload.type !== "image_url"
+        ) {
+          throw new Error("Image payload is incorrect");
+        } else {
+          // valid image, transform to DuckChatCompletionRequest
+          const newImagePayload: DuckChatCompletionContentImage = {
+            type: "image",
+          };
+          newImagePayload.image = imagePayload.image_url.url;
+          newImagePayload.mimeType = newImagePayload.image
+            .split(",")[0]
+            .split(":")[1]
+            .split(";")[0];
+
+          const clonedMessage = structuredClone(message);
+          const newMessage = {
+            ...clonedMessage,
+            content: [imageText, newImagePayload],
+          };
+          transformedMessages.push(newMessage as DuckChatCompletionMessage);
+        }
+      } else {
+        transformedMessages.push(message as DuckChatCompletionMessage);
+      }
+    }
+
     return {
       model,
-      messages: request.messages,
+      messages: transformedMessages,
       metadata: request.metadata,
     };
   }
@@ -572,7 +616,7 @@ Please follow these instructions when responding to the following user message.`
     }
 
     console.log(request.messages);
-    for (const message of request.messages) {
+    for (const message of request.messages as ChatCompletionMessage[]) {
       if (
         !message.role ||
         !["system", "developer", "user", "assistant", "tool"].includes(
@@ -585,10 +629,8 @@ Please follow these instructions when responding to the following user message.`
       }
 
       // Normalize developer role to system
-      for (const message of request.messages) {
-        if (message.role === "developer") {
-          message.role = "system";
-        }
+      if (message.role === "developer") {
+        message.role = "system";
       }
 
       // Tool messages have different validation rules
@@ -603,9 +645,13 @@ Please follow these instructions when responding to the following user message.`
         // For non-tool messages, content can be null if there are tool_calls
         if (
           message.content === undefined ||
-          (message.content !== null && typeof message.content !== "string")
+          (message.content !== null &&
+            typeof message.content !== "string" &&
+            !Array.isArray(message.content))
         ) {
-          throw new Error("Each message must have content as a string or null");
+          throw new Error(
+            "Each message must have content as a string, array (for images), or null",
+          );
         }
       }
     }
