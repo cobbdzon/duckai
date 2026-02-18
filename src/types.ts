@@ -40,6 +40,7 @@ export type ToolChoice =
 export interface ChatCompletionRequest {
   model: string;
   messages: ChatCompletionMessage[];
+  metadata?: DuckAIMetadata;
   temperature?: number;
   max_tokens?: number;
   stream?: boolean;
@@ -106,7 +107,21 @@ export interface VQDResponse {
   hash: string;
 }
 
+export interface DuckAIMetadata {
+  customization: {
+    additionalInstructions: string;
+    shouldSeekClarity: boolean;
+  };
+  toolChoice: {
+    NewsSearch: boolean;
+    VideosSearch: boolean;
+    LocalSearch: boolean;
+    WeatherForecast: boolean;
+  };
+}
+
 export interface DuckAIRequest {
   model: string;
   messages: ChatCompletionMessage[];
+  metadata?: DuckAIMetadata;
 }

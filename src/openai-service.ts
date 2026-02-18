@@ -10,6 +10,7 @@ import type {
   DuckAIRequest,
   ToolDefinition,
   ToolCall,
+  DuckAIMetadata,
 } from "./types";
 
 export class OpenAIService {
@@ -31,7 +32,7 @@ export class OpenAIService {
         try {
           // Simple calculator - in production, use a proper math parser
           const result = Function(
-            `"use strict"; return (${args.expression})`
+            `"use strict"; return (${args.expression})`,
           )();
           return { result };
         } catch (error) {
@@ -70,7 +71,7 @@ export class OpenAIService {
   }
 
   private transformToDuckAIRequest(
-    request: ChatCompletionRequest
+    request: ChatCompletionRequest,
   ): DuckAIRequest {
     // Use the model from request, fallback to default
     const model = request.model || "mistralai/Mistral-Small-24B-Instruct-2501";
@@ -78,17 +79,18 @@ export class OpenAIService {
     return {
       model,
       messages: request.messages,
+      metadata: request.metadata,
     };
   }
 
   async createChatCompletion(
-    request: ChatCompletionRequest
+    request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
     // Check if this request involves function calling
     if (
       this.toolService.shouldUseFunctionCalling(
         request.tools,
-        request.tool_choice
+        request.tool_choice,
       )
     ) {
       return this.createChatCompletionWithTools(request);
@@ -129,7 +131,7 @@ export class OpenAIService {
   }
 
   private async createChatCompletionWithTools(
-    request: ChatCompletionRequest
+    request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
     const id = this.generateId();
     const created = this.getCurrentTimestamp();
@@ -149,7 +151,7 @@ export class OpenAIService {
     if (request.tools && request.tools.length > 0) {
       const toolPrompt = this.toolService.generateToolSystemPrompt(
         request.tools,
-        request.tool_choice
+        request.tool_choice,
       );
       modifiedMessages.unshift({
         role: "user",
@@ -232,7 +234,7 @@ Please follow these instructions when responding to the following user message.`
 
         if (userContent.toLowerCase().includes("time")) {
           const timeFunction = request.tools.find(
-            (t) => t.function.name === "get_current_time"
+            (t) => t.function.name === "get_current_time",
           );
           if (timeFunction) functionToCall = timeFunction.function.name;
         } else if (
@@ -240,12 +242,12 @@ Please follow these instructions when responding to the following user message.`
           /\d+\s*[+\-*/]\s*\d+/.test(userContent)
         ) {
           const calcFunction = request.tools.find(
-            (t) => t.function.name === "calculate"
+            (t) => t.function.name === "calculate",
           );
           if (calcFunction) functionToCall = calcFunction.function.name;
         } else if (userContent.toLowerCase().includes("weather")) {
           const weatherFunction = request.tools.find(
-            (t) => t.function.name === "get_weather"
+            (t) => t.function.name === "get_weather",
           );
           if (weatherFunction) functionToCall = weatherFunction.function.name;
         }
@@ -261,7 +263,7 @@ Please follow these instructions when responding to the following user message.`
       } else if (functionToCall === "get_weather") {
         // Try to extract location from user message
         const locationMatch = userContent.match(
-          /(?:in|for|at)\s+([A-Za-z\s,]+)/i
+          /(?:in|for|at)\s+([A-Za-z\s,]+)/i,
         );
         if (locationMatch) {
           args = JSON.stringify({ location: locationMatch[1].trim() });
@@ -280,7 +282,7 @@ Please follow these instructions when responding to the following user message.`
       const promptText = modifiedMessages.map((m) => m.content || "").join(" ");
       const promptTokens = this.estimateTokens(promptText);
       const completionTokens = this.estimateTokens(
-        JSON.stringify(forcedToolCall)
+        JSON.stringify(forcedToolCall),
       );
 
       return {
@@ -336,13 +338,13 @@ Please follow these instructions when responding to the following user message.`
   }
 
   async createChatCompletionStream(
-    request: ChatCompletionRequest
+    request: ChatCompletionRequest,
   ): Promise<ReadableStream<Uint8Array>> {
     // Check if this request involves function calling
     if (
       this.toolService.shouldUseFunctionCalling(
         request.tools,
-        request.tool_choice
+        request.tool_choice,
       )
     ) {
       return this.createChatCompletionStreamWithTools(request);
@@ -416,7 +418,7 @@ Please follow these instructions when responding to the following user message.`
   }
 
   private async createChatCompletionStreamWithTools(
-    request: ChatCompletionRequest
+    request: ChatCompletionRequest,
   ): Promise<ReadableStream<Uint8Array>> {
     // For tools, we need to collect the full response first to parse function calls
     // This is a limitation of the "trick" approach - streaming with tools is complex
@@ -575,7 +577,7 @@ Please follow these instructions when responding to the following user message.`
         !["system", "user", "assistant", "tool"].includes(message.role)
       ) {
         throw new Error(
-          "Each message must have a valid role (system, user, assistant, or tool)"
+          "Each message must have a valid role (system, user, assistant, or tool)",
         );
       }
 
@@ -606,9 +608,28 @@ Please follow these instructions when responding to the following user message.`
       }
     }
 
+    // support for system prompt
+    var metadata: DuckAIMetadata = {
+      customization: {
+        additionalInstructions: "",
+        shouldSeekClarity: false,
+      },
+      toolChoice: {
+        NewsSearch: false,
+        VideosSearch: false,
+        LocalSearch: false,
+        WeatherForecast: false,
+      },
+    };
+    if (request.messages[0].role == "system") {
+      metadata.customization.additionalInstructions =
+        request.messages.shift().content;
+    }
+
     return {
       model: request.model || "mistralai/Mistral-Small-24B-Instruct-2501",
       messages: request.messages,
+      metadata: metadata,
       temperature: request.temperature,
       max_tokens: request.max_tokens,
       stream: request.stream || false,
@@ -624,7 +645,7 @@ Please follow these instructions when responding to the following user message.`
   async executeToolCall(toolCall: ToolCall): Promise<string> {
     return this.toolService.executeFunctionCall(
       toolCall,
-      this.availableFunctions
+      this.availableFunctions,
     );
   }
 
