@@ -273,7 +273,7 @@ Please follow these instructions when responding to the following user message.`
       const userContent = userMessage.content || "";
 
       // Determine which function to call
-      let functionToCall: string;
+      let functionToCall: string = "";
 
       // If specific function is requested, use that
       if (
@@ -281,7 +281,7 @@ Please follow these instructions when responding to the following user message.`
         request.tool_choice.type === "function"
       ) {
         functionToCall = request.tool_choice.function.name;
-      } else {
+      } else if (typeof userContent == "string") {
         // Try to infer which function to call based on the user's request
         // Simple heuristics to choose appropriate function
         functionToCall = request.tools[0].function.name; // Default to first function
@@ -309,18 +309,20 @@ Please follow these instructions when responding to the following user message.`
 
       // Generate appropriate arguments based on function
       let args = "{}";
-      if (functionToCall === "calculate") {
-        const mathMatch = userContent.match(/(\d+\s*[+\-*/]\s*\d+)/);
-        if (mathMatch) {
-          args = JSON.stringify({ expression: mathMatch[1] });
-        }
-      } else if (functionToCall === "get_weather") {
-        // Try to extract location from user message
-        const locationMatch = userContent.match(
-          /(?:in|for|at)\s+([A-Za-z\s,]+)/i,
-        );
-        if (locationMatch) {
-          args = JSON.stringify({ location: locationMatch[1].trim() });
+      if (typeof userContent == "string") {
+        if (functionToCall === "calculate") {
+          const mathMatch = userContent.match(/(\d+\s*[+\-*/]\s*\d+)/);
+          if (mathMatch) {
+            args = JSON.stringify({ expression: mathMatch[1] });
+          }
+        } else if (functionToCall === "get_weather") {
+          // Try to extract location from user message
+          const locationMatch = userContent.match(
+            /(?:in|for|at)\s+([A-Za-z\s,]+)/i,
+          );
+          if (locationMatch) {
+            args = JSON.stringify({ location: locationMatch[1].trim() });
+          }
         }
       }
 
@@ -625,7 +627,6 @@ Please follow these instructions when responding to the following user message.`
       throw new Error("messages array cannot be empty");
     }
 
-    console.log(request.messages);
     for (const message of request.messages as ChatCompletionMessage[]) {
       if (
         !message.role ||
