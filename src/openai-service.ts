@@ -564,7 +564,7 @@ Please follow these instructions when responding to the following user message.`
               choices: [
                 {
                   index: 0,
-                  delta: { content: contentChunk },
+                  delta: { content: contentChunk as string },
                   finish_reason: null,
                 },
               ],
