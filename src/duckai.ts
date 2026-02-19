@@ -46,7 +46,7 @@ export class DuckAI {
     const cutoff = now - this.WINDOW_SIZE_MS;
     this.rateLimitInfo.requestTimestamps =
       this.rateLimitInfo.requestTimestamps.filter(
-        (timestamp) => timestamp > cutoff
+        (timestamp) => timestamp > cutoff,
       );
   }
 
@@ -127,7 +127,7 @@ export class DuckAI {
     const timeSinceLastRequest = now - this.rateLimitInfo.lastRequestTime;
     const recommendedWait = Math.max(
       0,
-      this.MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest
+      this.MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest,
     );
 
     return {
@@ -183,7 +183,7 @@ export class DuckAI {
   }
 
   private async getEncodedVqdHash(vqdHash: string): Promise<string> {
-    const jsScript = Buffer.from(vqdHash, 'base64').toString('utf-8');
+    const jsScript = Buffer.from(vqdHash, "base64").toString("utf-8");
 
     const dom = new JSDOM(
       `<iframe id="jsa" sandbox="allow-scripts allow-same-origin" srcdoc="<!DOCTYPE html>
@@ -193,28 +193,34 @@ export class DuckAI {
 </head>
 <body></body>
 </html>" style="position: absolute; left: -9999px; top: -9999px;"></iframe>`,
-      { runScripts: 'dangerously' }
+      { runScripts: "dangerously" },
     );
     dom.window.top.__DDG_BE_VERSION__ = 1;
     dom.window.top.__DDG_FE_CHAT_HASH__ = 1;
-    const jsa = dom.window.top.document.querySelector('#jsa') as HTMLIFrameElement;
+    const jsa = dom.window.top.document.querySelector(
+      "#jsa",
+    ) as HTMLIFrameElement;
     const contentDoc = jsa.contentDocument || jsa.contentWindow!.document;
 
-    const meta = contentDoc.createElement('meta');
-    meta.setAttribute('http-equiv', 'Content-Security-Policy');
-    meta.setAttribute('content', "default-src 'none'; script-src 'unsafe-inline';");
+    const meta = contentDoc.createElement("meta");
+    meta.setAttribute("http-equiv", "Content-Security-Policy");
+    meta.setAttribute(
+      "content",
+      "default-src 'none'; script-src 'unsafe-inline';",
+    );
     contentDoc.head.appendChild(meta);
-    const result = await dom.window.eval(jsScript) as {
+    const result = (await dom.window.eval(jsScript)) as {
       client_hashes: string[];
       [key: string]: any;
     };
 
-    result.client_hashes[0] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+    result.client_hashes[0] =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
     result.client_hashes = result.client_hashes.map((t) => {
-      const hash = createHash('sha256');
+      const hash = createHash("sha256");
       hash.update(t);
 
-      return hash.digest('base64');
+      return hash.digest("base64");
     });
 
     return btoa(JSON.stringify(result));
@@ -243,16 +249,14 @@ export class DuckAI {
 
     if (!response.ok) {
       throw new Error(
-        `Failed to get VQD: ${response.status} ${response.statusText}`
+        `Failed to get VQD: ${response.status} ${response.statusText}`,
       );
     }
 
     const hashHeader = response.headers.get("x-Vqd-hash-1");
 
     if (!hashHeader) {
-      throw new Error(
-        `Missing VQD headers: hash=${!!hashHeader}`
-      );
+      throw new Error(`Missing VQD headers: hash=${!!hashHeader}`);
     }
 
     const encodedHash = await this.getEncodedVqdHash(hashHeader);
@@ -268,9 +272,9 @@ export class DuckAI {
         const hashBuffer = await crypto.subtle.digest("SHA-256", data);
         const hashArray = new Uint8Array(hashBuffer);
         return btoa(
-          hashArray.reduce((str, byte) => str + String.fromCharCode(byte), "")
+          hashArray.reduce((str, byte) => str + String.fromCharCode(byte), ""),
         );
-      })
+      }),
     );
   }
 
@@ -318,13 +322,13 @@ export class DuckAI {
       const retryAfter = response.headers.get("retry-after");
       const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000; // Default 1 minute
       throw new Error(
-        `Rate limited. Retry after ${waitTime}ms. Status: ${response.status}`
+        `Rate limited. Retry after ${waitTime}ms. Status: ${response.status}`,
       );
     }
 
     if (!response.ok) {
       throw new Error(
-        `DuckAI API error: ${response.status} ${response.statusText}`
+        `DuckAI API error: ${response.status} ${response.statusText}`,
       );
     }
 
@@ -411,13 +415,13 @@ export class DuckAI {
       const retryAfter = response.headers.get("retry-after");
       const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000; // Default 1 minute
       throw new Error(
-        `Rate limited. Retry after ${waitTime}ms. Status: ${response.status}`
+        `Rate limited. Retry after ${waitTime}ms. Status: ${response.status}`,
       );
     }
 
     if (!response.ok) {
       throw new Error(
-        `DuckAI API error: ${response.status} ${response.statusText}`
+        `DuckAI API error: ${response.status} ${response.statusText}`,
       );
     }
 
@@ -467,9 +471,10 @@ export class DuckAI {
       "gpt-4o-mini",
       "gpt-5-mini",
       "claude-3-5-haiku-latest",
+      "claude-haiku-4-5",
       "meta-llama/Llama-4-Scout-17B-16E-Instruct",
       "mistralai/Mistral-Small-24B-Instruct-2501",
-      "openai/gpt-oss-120b"
+      "openai/gpt-oss-120b",
     ];
   }
 }
