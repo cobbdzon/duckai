@@ -12,9 +12,9 @@ import type {
   ToolDefinition,
   ToolCall,
   DuckAIMetadata,
-  DuckChatCompletionContent,
+  DuckChatCompletionContentPart,
   DuckChatCompletionMessage,
-  ChatCompletionContent,
+  DuckChatCompletionContentPartImage,
 } from "./types";
 
 export class OpenAIService {
@@ -84,11 +84,9 @@ export class OpenAIService {
 
     // TODO: USE OPENAI TYPES INSTEAD OF MY OWN TYPES (DIDNT KNOW THEY EXISTED)
     for (const message of request.messages as ChatCompletionMessage[]) {
-      // Validate images in request message
-      // Transform to DuckChatCompletionRequest
       if (Array.isArray(message.content)) {
         const transformedContent = [];
-        for (const content of message.content as ChatCompletionContent[]) {
+        for (const content of message.content as ChatCompletionContentPart[]) {
           if (content.type == "text") {
             if (typeof content.text !== "string" || content.type !== "text") {
               throw new Error("Image text must be a string of type text");
@@ -104,14 +102,16 @@ export class OpenAIService {
               throw new Error("Image payload is incorrect");
             } else {
               // valid image, transform to DuckChatCompletionRequest
-              const newImagePayload: DuckChatCompletionContent = {
+              const newImagePayload: DuckChatCompletionContentPartImage = {
+                image: content.image_url.url,
                 type: "image",
+                mimeType: content.image_url.url
+                  .split(",")[0]
+                  .split(":")[1]
+                  .split(";")[0],
               };
-              newImagePayload.image = content.image_url.url;
-              newImagePayload.mimeType = newImagePayload.image
-                .split(",")[0]
-                .split(":")[1]
-                .split(";")[0];
+
+              console.log(newImagePayload);
 
               transformedContent.push(newImagePayload);
             }

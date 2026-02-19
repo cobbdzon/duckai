@@ -1,42 +1,41 @@
+import { ChatCompletionContentPart } from "openai/src/resources.js";
+
 // OpenAI API Types
-export interface ChatCompletionMessage {
-  role: "system" | "developer" | "user" | "assistant" | "tool";
-  content: string | ChatCompletionContent[] | null;
+type ChatCompletionMessageRole =
+  | "system"
+  | "developer"
+  | "user"
+  | "assistant"
+  | "tool";
+
+type BaseChatCompletionMessage<ContentPart> = {
+  role: ChatCompletionMessageRole;
+  content: string | ContentPart[] | null;
   name?: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+};
+
+export type ChatCompletionMessage =
+  BaseChatCompletionMessage<ChatCompletionContentPart>;
+export type DuckChatCompletionMessage =
+  BaseChatCompletionMessage<DuckChatCompletionContentPart>;
+
+// what duckduckgo accepts based on openai ChatCompletionContentPart types
+export interface DuckChatCompletionContentPartText {
+  text: string;
+  type: "text";
 }
 
-// DuckDuckGo ready type
-export interface DuckChatCompletionMessage {
-  role: "system" | "developer" | "user" | "assistant" | "tool";
-  content: string | DuckChatCompletionContent[] | null;
-  name?: string;
-  tool_calls?: ToolCall[];
-  tool_call_id?: string;
+export interface DuckChatCompletionContentPartImage {
+  image: string;
+  mimeType: string;
+  type: "image";
 }
 
-// image support
-// open ai standard
-// [0]: {text: string, type: "text"}
-// [1]: {image_url: { url: string }, type: "image_url"}
-export interface ChatCompletionContent {
-  text?: string;
-  image_url?: {
-    url: string;
-  };
-  type: "text" | "image_url";
-}
-
-// what duckduckgo accepts
-// [0]: {text: string, type: "text"}
-// [1]: {image: string, mimeType: string, type: "image"}
-export interface DuckChatCompletionContent {
-  text?: string;
-  image?: string;
-  mimeType?: string;
-  type: "text" | "image";
-}
+export type DuckChatCompletionContentPart =
+  | DuckChatCompletionContentPartText
+  | DuckChatCompletionContentPartImage;
 
 export interface FunctionDefinition {
   name: string;
