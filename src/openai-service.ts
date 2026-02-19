@@ -1,3 +1,4 @@
+import { ChatCompletionContentPart } from "openai/src/resources.js";
 import { DuckAI } from "./duckai";
 import { ToolService } from "./tool-service";
 import type {
@@ -11,8 +12,9 @@ import type {
   ToolDefinition,
   ToolCall,
   DuckAIMetadata,
-  DuckChatCompletionContentImage,
+  DuckChatCompletionContent,
   DuckChatCompletionMessage,
+  ChatCompletionContent,
 } from "./types";
 
 export class OpenAIService {
@@ -80,41 +82,49 @@ export class OpenAIService {
 
     const transformedMessages: DuckChatCompletionMessage[] = [];
 
-    // TODO: Fix cherry studio not working
+    // TODO: USE OPENAI TYPES INSTEAD OF MY OWN TYPES (DIDNT KNOW THEY EXISTED)
     for (const message of request.messages as ChatCompletionMessage[]) {
       // Validate images in request message
       // Transform to DuckChatCompletionRequest
       if (Array.isArray(message.content)) {
-        const imageText = message.content[0];
-        if (typeof imageText.text !== "string" || imageText.type !== "text") {
-          throw new Error("Image text must be a string of type text");
+        const transformedContent = [];
+        for (const content of message.content as ChatCompletionContent[]) {
+          if (content.type == "text") {
+            if (typeof content.text !== "string" || content.type !== "text") {
+              throw new Error("Image text must be a string of type text");
+            } else {
+              transformedContent.push(content);
+            }
+          } else if (content.type == "image_url") {
+            if (
+              content.image_url === null ||
+              typeof content.image_url?.url !== "string" ||
+              content.type !== "image_url"
+            ) {
+              throw new Error("Image payload is incorrect");
+            } else {
+              // valid image, transform to DuckChatCompletionRequest
+              const newImagePayload: DuckChatCompletionContent = {
+                type: "image",
+              };
+              newImagePayload.image = content.image_url.url;
+              newImagePayload.mimeType = newImagePayload.image
+                .split(",")[0]
+                .split(":")[1]
+                .split(";")[0];
+
+              transformedContent.push(newImagePayload);
+            }
+          }
         }
 
-        const imagePayload = message.content[1];
-        if (
-          imagePayload.image_url === null ||
-          typeof imagePayload.image_url?.url !== "string" ||
-          imagePayload.type !== "image_url"
-        ) {
-          throw new Error("Image payload is incorrect");
-        } else {
-          // valid image, transform to DuckChatCompletionRequest
-          const newImagePayload: DuckChatCompletionContentImage = {
-            type: "image",
-          };
-          newImagePayload.image = imagePayload.image_url.url;
-          newImagePayload.mimeType = newImagePayload.image
-            .split(",")[0]
-            .split(":")[1]
-            .split(";")[0];
-
-          const clonedMessage = structuredClone(message);
-          const newMessage = {
-            ...clonedMessage,
-            content: [imageText, newImagePayload],
-          };
-          transformedMessages.push(newMessage as DuckChatCompletionMessage);
-        }
+        // transform message
+        const clonedMessage = structuredClone(message);
+        const newMessage = {
+          ...clonedMessage,
+          content: transformedContent,
+        };
+        transformedMessages.push(newMessage as DuckChatCompletionMessage);
       } else {
         transformedMessages.push(message as DuckChatCompletionMessage);
       }
