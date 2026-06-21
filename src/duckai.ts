@@ -5,6 +5,8 @@ import type {
   ChatCompletionMessage,
   VQDResponse,
   DuckAIRequest,
+  DuckAIChatResult,
+  DuckAIStreamChunk,
   DuckChatCompletionMessage,
   ChatCompletionRequest,
   DuckChatCompletionContentPartImage,
@@ -52,6 +54,11 @@ export class DuckAI {
 
   private get vqdStack(): string {
     return process.env.X_VQD_STACK || DuckAI.DEFAULT_VQD_STACK;
+  }
+
+  private get emitReasoning(): boolean {
+    const v = process.env.X_EMIT_REASONING;
+    return v === "1" || v === "true";
   }
 
   constructor() {
@@ -357,7 +364,10 @@ export class DuckAI {
     return response;
   }
 
-  async chat(request: DuckAIRequest, attempt?: number): Promise<string> {
+  async chat(
+    request: DuckAIRequest,
+    attempt?: number,
+  ): Promise<DuckAIChatResult> {
     // Wait if rate limiting is needed
     await this.waitIfNeeded();
 
@@ -403,37 +413,48 @@ export class DuckAI {
       // Not JSON, continue processing
     }
 
-    // Extract the LLM response from the streamed response
-    let llmResponse = "";
+    // Extract content and reasoning from the streamed response
+    let content = "";
+    let reasoning = "";
     const lines = text.split("\n");
     for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        try {
-          const json = JSON.parse(line.slice(6));
-          if (json.message) {
-            llmResponse += json.message;
-          }
-        } catch (e) {
-          // Skip invalid JSON lines
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6);
+      if (payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload);
+        if (json.role === "reasoning" && typeof json.text === "string") {
+          reasoning += json.text;
+        } else if (typeof json.message === "string") {
+          content += json.message;
         }
+      } catch (e) {
+        // Skip invalid JSON lines (incl. [CHAT_TITLE:...] and [PING] sentinels)
       }
     }
 
-    const finalResponse = llmResponse.trim();
+    const finalContent = content.trim();
 
-    // If response is empty, try 5 times and provide a fallback
+    // If content is empty, retry up to 5 times then fall back
     var currentAttempt = attempt || 0;
-    if (!finalResponse && currentAttempt <= 5) {
+    if (!finalContent && currentAttempt <= 5) {
       console.warn("Duck.ai returned empty response, retrying call");
       return this.chat(request, currentAttempt + 1);
     } else if (currentAttempt > 5) {
-      return "I apologize, but I'm unable to provide a response at the moment. Please try again.";
+      return {
+        content:
+          "I apologize, but I'm unable to provide a response at the moment. Please try again.",
+      };
     }
 
-    return finalResponse;
+    const result: DuckAIChatResult = { content: finalContent };
+    if (this.emitReasoning && reasoning) result.reasoning = reasoning;
+    return result;
   }
 
-  async chatStream(request: DuckAIRequest): Promise<ReadableStream<string>> {
+  async chatStream(
+    request: DuckAIRequest,
+  ): Promise<ReadableStream<DuckAIStreamChunk>> {
     // Wait if rate limiting is needed
     await this.waitIfNeeded();
 
@@ -471,32 +492,48 @@ export class DuckAI {
       throw new Error("No response body");
     }
 
+    const emitReasoning = this.emitReasoning;
+
     return new ReadableStream({
       start(controller) {
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
+        let buf = "";
+
+        function handleLine(line: string) {
+          if (!line.startsWith("data: ")) return;
+          const payload = line.slice(6);
+          if (payload === "[DONE]") return;
+          try {
+            const json = JSON.parse(payload);
+            if (
+              emitReasoning &&
+              json.role === "reasoning" &&
+              typeof json.text === "string" &&
+              json.text.length > 0
+            ) {
+              controller.enqueue({ type: "reasoning", text: json.text });
+            } else if (typeof json.message === "string") {
+              controller.enqueue({ type: "content", text: json.message });
+            }
+          } catch (e) {
+            // Skip invalid JSON (incl. [CHAT_TITLE:...] / [PING] sentinels)
+          }
+        }
 
         function pump(): Promise<void> {
           return reader.read().then(({ done, value }) => {
             if (done) {
+              if (buf.length > 0) handleLine(buf);
               controller.close();
               return;
             }
 
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n");
-
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                try {
-                  const json = JSON.parse(line.slice(6));
-                  if (json.message) {
-                    controller.enqueue(json.message);
-                  }
-                } catch (e) {
-                  // Skip invalid JSON
-                }
-              }
+            buf += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf("\n")) >= 0) {
+              handleLine(buf.slice(0, idx));
+              buf = buf.slice(idx + 1);
             }
 
             return pump();

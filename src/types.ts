@@ -13,6 +13,7 @@ type ChatCompletionMessageRole =
 type BaseChatCompletionMessage<ContentPart> = {
   role: ChatCompletionMessageRole;
   content: string | ContentPart[] | null;
+  reasoning_content?: string;
   name?: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
@@ -118,6 +119,7 @@ export interface ChatCompletionStreamChoice {
   delta: {
     role?: "assistant";
     content?: string;
+    reasoning_content?: string;
     tool_calls?: ToolCall[];
   };
   finish_reason: "stop" | "length" | "content_filter" | "tool_calls" | null;
@@ -169,3 +171,12 @@ export interface DuckAIRequest {
   reasoningEffort?: DuckAIReasoningEffort;
   canUseTools: boolean;
 }
+
+export interface DuckAIChatResult {
+  content: string;
+  reasoning?: string;
+}
+
+export type DuckAIStreamChunk =
+  | { type: "content"; text: string }
+  | { type: "reasoning"; text: string };
