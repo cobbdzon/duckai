@@ -89,7 +89,8 @@ export class OpenAIService {
     }
 
     const duckAIRequest = DuckAI.transformToDuckAIRequest(request);
-    const response = await this.duckAI.chat(duckAIRequest);
+    const { content: response, reasoning } =
+      await this.duckAI.chat(duckAIRequest);
 
     const id = this.generateId();
     const created = this.getCurrentTimestamp();
@@ -110,6 +111,7 @@ export class OpenAIService {
           message: {
             role: "assistant",
             content: response,
+            ...(reasoning ? { reasoning_content: reasoning } : {}),
           },
           finish_reason: "stop",
         },
@@ -158,7 +160,8 @@ Please follow these instructions when responding to the following user message.`
       messages: modifiedMessages,
     });
 
-    const response = await this.duckAI.chat(duckAIRequest);
+    const { content: response, reasoning } =
+      await this.duckAI.chat(duckAIRequest);
 
     // Check if the response contains function calls
     if (this.toolService.detectFunctionCalls(response)) {
@@ -319,6 +322,7 @@ Please follow these instructions when responding to the following user message.`
           message: {
             role: "assistant",
             content: response,
+            ...(reasoning ? { reasoning_content: reasoning } : {}),
           },
           finish_reason: "stop",
         },
@@ -382,6 +386,14 @@ Please follow these instructions when responding to the following user message.`
               return;
             }
 
+            const delta: ChatCompletionStreamResponse["choices"][0]["delta"] =
+              isFirst ? { role: "assistant" } : {};
+            if (value.type === "reasoning") {
+              delta.reasoning_content = value.text;
+            } else {
+              delta.content = value.text;
+            }
+
             const chunk: ChatCompletionStreamResponse = {
               id,
               object: "chat.completion.chunk",
@@ -390,9 +402,7 @@ Please follow these instructions when responding to the following user message.`
               choices: [
                 {
                   index: 0,
-                  delta: isFirst
-                    ? { role: "assistant", content: value }
-                    : { content: value },
+                  delta,
                   finish_reason: null,
                 },
               ],
