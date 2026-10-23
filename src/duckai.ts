@@ -17,6 +17,7 @@ import { Buffer } from "node:buffer";
 import { DUCKAI_MODELS } from "./models";
 import { ChatCompletionContentPart } from "openai/src/resources.js";
 import { sleep } from "bun";
+import { performance } from "node:perf_hooks";
 
 // Rate limiting tracking with sliding window
 interface RateLimitInfo {
@@ -24,6 +25,14 @@ interface RateLimitInfo {
   lastRequestTime: number;
   isLimited: boolean;
   retryAfter?: number;
+}
+
+function getEnvPublicKey(): object {
+  const key = process.env["STREAM_KEY"];
+  if (!key) throw new Error("STREAM_KEY environment variable is not set");
+  const privateKeyPem = JSON.parse(key);
+
+  return privateKeyPem.publicKey;
 }
 
 export class DuckAI {
@@ -211,37 +220,42 @@ export class DuckAI {
     }
   }
 
-  private async getEncodedVqdHash(vqdHash: string): Promise<string> {
-    const jsScript = Buffer.from(vqdHash, "base64").toString("utf-8");
-
-    const dom = new JSDOM(
-      `<iframe id="jsa" sandbox="allow-scripts allow-same-origin" srcdoc="<!DOCTYPE html>
-<html>
-<head>
-<meta http-equiv="Content-Security-Policy"; content="default-src 'none'; script-src 'unsafe-inline'">
-</head>
-<body></body>
-</html>" style="position: absolute; left: -9999px; top: -9999px;"></iframe>`,
-      { runScripts: "dangerously" },
-    );
-    dom.window.top.__DDG_BE_VERSION__ = 1;
-    dom.window.top.__DDG_FE_CHAT_HASH__ = 1;
-    const jsa = dom.window.top.document.querySelector(
-      "#jsa",
-    ) as HTMLIFrameElement;
-    const contentDoc = jsa.contentDocument || jsa.contentWindow!.document;
-
-    const meta = contentDoc.createElement("meta");
-    meta.setAttribute("http-equiv", "Content-Security-Policy");
-    meta.setAttribute(
-      "content",
-      "default-src 'none'; script-src 'unsafe-inline';",
-    );
-    contentDoc.head.appendChild(meta);
+  private async getEncodedVqdHash(vqdHash: string): Promise<VQDResponse> {
+    const jsScript = atob(vqdHash);
+    const response = await fetch('https://duck.ai/');
+    if (!response.ok) throw new Error(`[getEncodedVqdHash] HTTP ${response.status}`);
+    
+    const html = await response.text();
+    const dom = new JSDOM(html, {
+      runScripts: "outside-only",
+    });
+    
+    const { window } = dom;
+    
+    const version = window.document.documentElement.getAttribute('data-version-tag');
+    if (!version) throw new Error("[getEncodedVqdHash] No version tag found");
+    const sha = window.document.documentElement.getAttribute('data-version-sha');
+    if (!sha) throw new Error("[getEncodedVqdHash] No version sha found");
+    
+    dom.window.top.__DDG_BE_VERSION__ = version;
+    dom.window.top.__DDG_FE_CHAT_HASH__ = sha;
+    
+    const scripts = [...dom.window.document.querySelectorAll("script[src]")];
+    const pattern = /\/dist\/duckai-dist\/entry.duckai.[a-zA-Z0-9]+\.js/i;
+    
+    const stackElm = scripts.filter((script) => {
+      const src = script.getAttribute("src");
+      return src && pattern.test(src);
+    }).at(0);
+    if (!stackElm) throw new Error("[getEncodedVqdHash] No matching script found");
+    const stack = new URL(stackElm.getAttribute("src") as string, 'https://duck.ai').toString();
+    
+    const durationStart = performance.now();    
     const result = (await dom.window.eval(jsScript)) as {
       client_hashes: string[];
       [key: string]: any;
     };
+    const duration = performance.now() - durationStart;
 
     result.client_hashes[0] = this.userAgent;
     result.client_hashes = result.client_hashes.map((t) => {
@@ -254,11 +268,11 @@ export class DuckAI {
     // duck.ai validates these meta fields; JSDOM can't produce them on its own
     if (result.meta && typeof result.meta === "object") {
       (result.meta as any).origin = "https://duck.ai";
-      (result.meta as any).stack = this.vqdStack;
-      (result.meta as any).duration = String(20 + Math.floor(Math.random() * 30));
+      (result.meta as any).stack = stack;
+      (result.meta as any).duration = duration;
     }
 
-    return btoa(JSON.stringify(result));
+    return { hash: btoa(JSON.stringify(result)), version: `${version}-${sha}` };
   }
 
   private async getVQD(userAgent: string): Promise<VQDResponse> {
@@ -294,9 +308,7 @@ export class DuckAI {
       throw new Error(`Missing VQD headers: hash=${!!hashHeader}`);
     }
 
-    const encodedHash = await this.getEncodedVqdHash(hashHeader);
-
-    return { hash: encodedHash };
+    return await this.getEncodedVqdHash(hashHeader);
   }
 
   private async hashClientHashes(clientHashes: string[]): Promise<string[]> {
@@ -318,28 +330,36 @@ export class DuckAI {
     userAgent: string,
     vqd: VQDResponse,
   ): Promise<Response> {
+    const basedelta = [0,0,0].reduce((acc, _, index) => {
+      if (index === 0) {
+        acc.push(Math.ceil(Math.random() * 490209 + 201654));
+        return acc;
+      }
+      const last = acc[index - 1];
+      acc.push(last + Math.ceil(Math.random() * 2222 + 1111));
+      return acc;
+    }, [] as number[]);
+
+    const fesig = `{"start":${Date.now()},"events":[{"name":"recentChatsButtonClick","delta":${basedelta[0]}},{"name":"recentChatsListImpression","delta":${basedelta[1]}},{"name":"startNewChat_free","delta":${basedelta[2]}}],"end":${
+      basedelta[2] + Math.ceil(Math.random() * 39520 + 11111)
+    }}`;
+    // console.log(`Using x-fe-signals: ${fesig} : ${btoa(fesig)}
+    // x-vqd-hash-1: ${vqd.hash}`);
+
     return await fetch("https://duck.ai/duckchat/v1/chat", {
-      headers: {
-        accept: "text/event-stream",
-        "accept-language": "en-US,en;q=0.9",
-        "cache-control": "no-cache",
+      "headers": {
+        "accept": "text/event-stream",
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
         "content-type": "application/json",
-        pragma: "no-cache",
-        priority: "u=0",
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
-        "x-fe-signals": process.env.X_FE_SIGNALS,
-        "x-fe-version": process.env.X_FE_VERSION,
+        "priority": "u=1, i",
+        "x-fe-signals": btoa(fesig),
+        "x-fe-version": vqd.version,
         "User-Agent": userAgent,
         "x-vqd-hash-1": vqd.hash,
+        "Referer": "https://duck.ai/"
       },
-      referrer: "https://duck.ai/",
-      referrerPolicy: "origin",
-      body: JSON.stringify(request),
-      method: "POST",
-      mode: "cors",
-      credentials: "include",
+      "body": JSON.stringify(request),
+      "method": "POST"
     });
   }
 
@@ -654,6 +674,11 @@ export class DuckAI {
       metadata: request.metadata,
       model,
       reasoningEffort: reasoning_effort,
+      durableStream: {
+        conversationId: crypto.randomUUID(),
+        messageId: crypto.randomUUID(),
+        publicKey: getEnvPublicKey(), // STREAMING_PUBLIC_KEY
+      },
     };
   }
 }

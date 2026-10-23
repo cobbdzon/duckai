@@ -1,10 +1,7 @@
 declare module "bun" {
   interface Env {
     // Add your environment variables here
-    X_FE_SIGNALS: string;
-    X_FE_VERSION: string;
     X_USER_AGENT: string;
-    X_VQD_STACK: string;
     X_MODELS_JSON: string;
     X_EMIT_REASONING: string;
     PORT: number;
